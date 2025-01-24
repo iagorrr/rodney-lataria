@@ -1,8 +1,12 @@
-#define DEBUG
+#define DEBUG_MOTOR
+#define DEBUG_PRINT
+#define DEBUG_ULTRASONIC
+
+const uint8_t PIN_LED = 2;
 
 namespace Ultrasonic {
-const uint8_t PIN_TRIG = 35;
-const uint8_t PIN_ECHO = 32;
+const uint8_t PIN_TRIG = 33;
+const uint8_t PIN_ECHO = 35;
 
 //Half sound speed in cm / us
 const double HALF_SOUND_SPEED = 0.017;
@@ -12,8 +16,9 @@ inline void setup() {
   pinMode(PIN_ECHO, INPUT);
 }
 
-double duration_us, distance_cm;
+
 inline double get_distance() {
+  static double duration_us, distance_cm;
   digitalWrite(PIN_TRIG, LOW);
   delayMicroseconds(2);
   digitalWrite(PIN_TRIG, HIGH);
@@ -28,7 +33,8 @@ inline double get_distance() {
 
 namespace Motors {
 const uint8_t PINS[2][2] = {
-  { 12, 14 }, { 27, 26 }
+  { 12, 14 },
+  { 27, 26 },
 };
 
 
@@ -43,8 +49,10 @@ enum Direction {
 };
 
 void move(int32_t t, Side s, Direction d) {
-  digitalWrite(PINS[s][0], d),
-    digitalWrite(PINS[s][1], !d);
+  auto a = d ? HIGH : LOW;
+  auto b = d ? LOW : HIGH;
+  digitalWrite(PINS[s][0], a),
+    digitalWrite(PINS[s][1], b);
 
   delayMicroseconds(t);
 
@@ -76,9 +84,11 @@ inline void setup() {
     }
   }
 
-#ifdef DEBUG
-  pinMode(2, OUTPUT);
-  digitalWrite(2, HIGH);
+
+
+#ifdef DEBUG_MOTOR
+  Serial.printf("MOTOR: test started\n");
+  digitalWrite(PIN_LED, HIGH);
 
   move(2 * 1e6, Side::left, Direction::foward);
   move(2 * 1e6, Side::left, Direction::backward);
@@ -89,7 +99,8 @@ inline void setup() {
   move(2 * 1e6, Direction::foward);
   move(2 * 1e6, Direction::backward);
 
-  digitalWrite(2, LOW);
+  digitalWrite(PIN_LED, LOW);
+  Serial.printf("MOTOR: Test finished\n");
 #endif
 }
 }
@@ -127,15 +138,18 @@ Arena_position get_arena_position(Infrared_position p) {
 
 void setup() {
   Serial.begin(9600);
+
+  pinMode(PIN_LED, OUTPUT);
+
   Infrared::setup();
   Ultrasonic::setup();
   Motors::setup();
+  pinMode(2, OUTPUT);
 }
 
 
-
-void loop() {
-#ifdef DEBUG
+void debug() {
+#ifdef DEBUG_PRINT
   static int idx;
   Serial.printf("%4d \t IRFL %d \t IRFR %d \t IRBR %d \t IRBL %d \t US %0.2f\n",
                 idx++,
@@ -145,6 +159,18 @@ void loop() {
                 Infrared::get_arena_position(Infrared::BACK_LEFT),
                 Ultrasonic::get_distance());
   Serial.flush();
+#endif
+
+#ifdef DEBUG_ULTRASONIC
+  if (Ultrasonic::get_distance() >= 10) {
+    digitalWrite(PIN_LED, HIGH);
+  } else digitalWrite(PIN_LED, LOW);
+#endif
+}
+
+void loop() {
+#ifdef PROTOTYPE
+  debug();
 #endif
 }
 
