@@ -11,10 +11,8 @@
 const uint8_t PIN_LED = 2;
 
 namespace Constants {
-const double arena_ratio_cm = 20;
-const double min_atk_dist = arena_ratio_cm * 2;
-const double micro_backward_time_ms = 200;
-const double micro_rotation_time_ms = 100;
+const double ARENA_RADIUS_CM = 400;
+const double MIN_ATK_DIST_CM = ARENA_RADIUS_CM * 2;
 };        // namespace Constants
 
 namespace Ultrasonic {
@@ -39,7 +37,7 @@ inline double get_distance() {
 
 #ifdef DEBUG_ULTRASONIC
 
-        if (distance_cm > Constants::min_atk_dist) {
+        if (distance_cm > Constants::MIN_ATK_DIST_CM) {
                 digitalWrite(PIN_LED, HIGH);
         } else
                 digitalWrite(PIN_LED, LOW);
@@ -56,8 +54,6 @@ const uint8_t PINS[2][2] = {
         {26, 27},
 };
 
-const uint8_t MIN_SPEED = 40;
-
 const uint32_t PWM_FREQ = 20000;
 const uint8_t PWM_RES = 8;
 
@@ -65,41 +61,31 @@ enum Side { left, right };
 
 enum Direction { foward, backward };
 
-/*
- * GAMBIARRA to don't set a state twice
- * This may be a mutex
- * */
-enum State { stoped, rotating, moving_foward, moving_backward };
-State current = State::stoped;
-bool set_state(State st) { return current == st ? true : current = st, false; }
-
-void stop(Side s) {
-        ledcWrite(PINS[s][0], 0), ledcWrite(PINS[s][1], 0);
-}
+void stop(Side s) { ledcWrite(PINS[s][0], 0), ledcWrite(PINS[s][1], 0); }
 
 void stop() {
         // if (set_state(State::stoped)) return;
         stop(Side::left), stop(Side::right);
 }
 
-void move(Side s, Direction d, uint8_t speed=MIN_SPEED) {
+const uint8_t MIN_MOVE_SPEED = 255 * 0.8;
+void move(Side s, Direction d, uint8_t speed = MIN_MOVE_SPEED) {
         ledcWrite(PINS[s][d], 0), ledcWrite(PINS[s][!d], speed);
 }
 
-void move(Direction d, uint8_t speed=MIN_SPEED) {
-        // if (set_state(d == Direction::foward ? State::moving_foward
-        //                                      : State::moving_backward))
-        //         return;
-
-        move(Side::left, d, speed), move(Side::right, d, speed);
+void move(Direction d, uint8_t speed = MIN_MOVE_SPEED) {
+        move(Side::right, d, min(speed, (uint8_t)(speed * 0.7))),
+                move(Side::left, d, speed);
 }
 
 /*
  * Simply rotates clockwise :D
  * */
-void rotate(uint8_t speed=MIN_SPEED) {
+const uint8_t MIN_ROTATE_SPEED = 255 * 0.35;
+void rotate(uint8_t speed = MIN_ROTATE_SPEED) {
         // if (set_state(State::rotating)) return;
-        move(Side::left, Direction::foward, speed), move(Side::right, Direction::backward, speed);
+        move(Side::left, Direction::foward, speed),
+                move(Side::right, Direction::backward, speed);
 }
 
 inline void setup() {
@@ -140,10 +126,13 @@ inline void setup() {
         digitalWrite(PIN_LED, LOW);
         Serial.printf("MOTOR: Test finished\n");
 #endif
+        Motors::stop();
 }
 }        // namespace Motors
 
 namespace Infrared {
+
+bool parameufi = false;
 
 enum Infrared_position {
         FRONT_LEFT,
@@ -154,53 +143,43 @@ enum Infrared_position {
 };
 const uint8_t PIN_OUT[]{15, 4, 19, 22};
 
+void IRAM_ATTR fallback() { parameufi = true; }
+
 inline void setup() {
-        pinMode(PIN_OUT[Infrared_position::FRONT_LEFT], INPUT);
-        pinMode(PIN_OUT[Infrared_position::FRONT_RIGHT], INPUT);
-        pinMode(PIN_OUT[Infrared_position::BACK_RIGHT], INPUT);
-        pinMode(PIN_OUT[Infrared_position::BACK_LEFT], INPUT);
+        for (int i = 0; i < 2; i++) {
+                pinMode(PIN_OUT[i], INPUT_PULLUP);
+                attachInterrupt(digitalPinToInterrupt(PIN_OUT[i]), fallback,
+                                RISING);
+        }
 }
 
 enum Arena_position { OUT, IN };
 
 Arena_position get_arena_position(Infrared_position p) {
-        return (Arena_position)digitalRead(PIN_OUT[p]);
+        return (Arena_position)!digitalRead(PIN_OUT[p]);
 }
 
 Arena_position get_front_position() {
-        return (Arena_position)(get_arena_position(
-                                        Infrared_position::FRONT_LEFT) and
-                                get_arena_position(
-                                        Infrared_position::FRONT_RIGHT));
+        auto ret = (Arena_position)(get_arena_position(
+                                            Infrared_position::FRONT_LEFT) and
+                                    get_arena_position(
+                                            Infrared_position::FRONT_RIGHT));
+        if (!ret) {
+                digitalWrite(PIN_LED, HIGH);
+        } else
+                digitalWrite(PIN_LED, LOW);
+        return ret;
 }
 
 }        // namespace Infrared
 
-// void IRAM_ATTR onTimer(){
-//         ledcWrite(Motors::PINS[Motors::left][0], 0);
-//         ledcWrite(Motors::PINS[Motors::left][1], 160);
-
-//         ledcWrite(Motors::PINS[Motors::right][0], 0);
-//         ledcWrite(Motors::PINS[Motors::right][1], 160);
-//         delay(1000);
-// }
-
 hw_timer_t *timer = NULL;
 void setup() {
-        Serial.begin(9600);
-        Serial.println("Setup starting...");
-
         pinMode(PIN_LED, OUTPUT);
-
+        Motors::setup();
         Infrared::setup();
         Ultrasonic::setup();
-        Motors::setup();
-
-        // timer = timerBegin(1000000);
-        // timerAttachInterrupt(timer, &onTimer);
-        // timerAlarm(timer, 8000000, true, 0);
-
-        Serial.println("Setup starting...");
+        delay(5000);
 }
 
 // int c = 0;
@@ -218,26 +197,27 @@ void loop() {
                 Ultrasonic::get_distance(), (int)Motors::current);
         Serial.flush();
 #endif
-        // if (!Infrared::get_front_position()) {
-        //          /*
-        //           * Any infrared out of arena
-        //           */
-        //           Motors::stop();
-        //         delay(100);
-        //          Motors::move(Motors::Direction::backward);
-        //          delay(100);
-        //          Motors::rotate();
-        //          delay(100);
-        // } else
-        if (Ultrasonic::get_distance() <= Constants::min_atk_dist) {
-                /*
-                 * Start engage or keep may it
-                 */
-                move(Motors::Direction::foward);
-        } else {
-                /*
-                 * Seek and destroy !
-                 * */
+        if (Infrared::parameufi) {
+                Infrared::parameufi = false;
+                Motors::stop();
+                delay(500);
+                Motors::move(Motors::Direction::backward);
+                delay(300);
                 Motors::rotate();
+                delay(250);
+                Infrared::parameufi = false;
+        } else if (Ultrasonic::get_distance() <= Constants::MIN_ATK_DIST_CM) {
+                Motors::stop();
+                delay(500);
+                Motors::move(Motors::Direction::foward);
+                delay(200);
+        } else {
+                Motors::rotate();
+                delay(250);
         }
+
+        Motors::stop();
+        delay(200);
 }
+
+// oi como faz isso aqui
