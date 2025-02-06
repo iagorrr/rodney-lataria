@@ -6,12 +6,11 @@
 // #define DEBUG_MOTOR
 // #define DEBUG_PRINT
 #define DEBUG_ULTRASONIC
-// #define PROTOTYPE
 
 const uint8_t PIN_LED = 2;
 
 namespace Constants {
-const double ARENA_RADIUS_CM = 400;
+const double ARENA_RADIUS_CM = 50;
 const double MIN_ATK_DIST_CM = ARENA_RADIUS_CM * 2;
 };        // namespace Constants
 
@@ -74,8 +73,8 @@ void move(Side s, Direction d, uint8_t speed = MIN_MOVE_SPEED) {
 }
 
 void move(Direction d, uint8_t speed = MIN_MOVE_SPEED) {
-        move(Side::right, d, min(speed, (uint8_t)(speed * 0.7))),
-                move(Side::left, d, speed);
+        move(Side::left, d, min(speed, (uint8_t)(speed * 0.95))),
+                move(Side::right, d, speed);
 }
 
 /*
@@ -132,8 +131,6 @@ inline void setup() {
 
 namespace Infrared {
 
-bool parameufi = false;
-
 enum Infrared_position {
         FRONT_LEFT,
         FRONT_RIGHT,
@@ -143,6 +140,7 @@ enum Infrared_position {
 };
 const uint8_t PIN_OUT[]{15, 4, 19, 22};
 
+bool parameufi = false;
 void IRAM_ATTR fallback() { parameufi = true; }
 
 inline void setup() {
@@ -173,7 +171,6 @@ Arena_position get_front_position() {
 
 }        // namespace Infrared
 
-hw_timer_t *timer = NULL;
 void setup() {
         pinMode(PIN_LED, OUTPUT);
         Motors::setup();
@@ -198,14 +195,19 @@ void loop() {
         Serial.flush();
 #endif
         if (Infrared::parameufi) {
-                Infrared::parameufi = false;
                 Motors::stop();
                 delay(500);
                 Motors::move(Motors::Direction::backward);
-                delay(300);
+                delay(500);
+
+                Motors::stop();
+                delay(500);
+
                 Motors::rotate();
-                delay(250);
+                delay(450);
+
                 Infrared::parameufi = false;
+
         } else if (Ultrasonic::get_distance() <= Constants::MIN_ATK_DIST_CM) {
                 Motors::stop();
                 delay(500);
