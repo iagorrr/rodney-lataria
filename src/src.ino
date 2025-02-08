@@ -5,6 +5,7 @@
 
 // #define DEBUG_MOTOR
 // #define DEBUG_PRINT
+#include <algorithm>
 #define DEBUG_ULTRASONIC
 
 const uint8_t PIN_LED = 2;
@@ -12,6 +13,7 @@ const uint8_t PIN_LED = 2;
 namespace Constants {
 const double ARENA_RADIUS_CM = 50;
 const double MIN_ATK_DIST_CM = ARENA_RADIUS_CM * 2;
+const double COLADINHO = 10;
 };        // namespace Constants
 
 namespace Ultrasonic {
@@ -82,7 +84,6 @@ void move(Direction d, uint8_t speed = MIN_MOVE_SPEED) {
  * */
 const uint8_t MIN_ROTATE_SPEED = 255 * 0.35;
 void rotate(uint8_t speed = MIN_ROTATE_SPEED) {
-        // if (set_state(State::rotating)) return;
         move(Side::left, Direction::foward, speed),
                 move(Side::right, Direction::backward, speed);
 }
@@ -179,7 +180,14 @@ void setup() {
         delay(5000);
 }
 
-// int c = 0;
+enum State {
+        retreat,
+        seek,
+        destroy,
+};
+uint32_t same_state = 1;
+State current = State::seek;
+
 void loop() {
 #ifdef DEBUG_PRINT
         static int idx;
@@ -194,7 +202,12 @@ void loop() {
                 Ultrasonic::get_distance(), (int)Motors::current);
         Serial.flush();
 #endif
+
+        State prev_st = current;
+        auto target_distance = Ultrasonic::get_distance();
         if (Infrared::parameufi) {
+                current = State::retreat;
+                Infrared::parameufi = false;
                 Motors::stop();
                 delay(500);
                 Motors::move(Motors::Direction::backward);
@@ -208,18 +221,35 @@ void loop() {
 
                 Infrared::parameufi = false;
 
-        } else if (Ultrasonic::get_distance() <= Constants::MIN_ATK_DIST_CM) {
-                Motors::stop();
-                delay(500);
-                Motors::move(Motors::Direction::foward);
-                delay(200);
+        } else if (target_distance <= Constants::MIN_ATK_DIST_CM) {
+                current = State::destroy;
+
+                double offset = 1;
+
+                if (target_distance <= Constants::COLADINHO)
+                        offset +=
+                                max((int32_t)0, (int32_t)same_state - 5) * 0.25;
+
+                uint32_t attack_speed =
+                        min((uint32_t)230,
+                            (uint32_t)(Motors::MIN_MOVE_SPEED * offset));
+
+                Motors::move(Motors::Direction::foward, attack_speed);
+                delay(min((int)(200 * offset), 500));
         } else {
-                Motors::rotate();
+                current = State::seek;
+
+                double offset =
+                        1 + max((int32_t)0, (int32_t)same_state - 5) * 0.20;
+                uint32_t rotate_speed =
+                        min((uint32_t)250,
+                            (uint32_t)(Motors::MIN_ROTATE_SPEED * offset));
+                Motors::rotate(rotate_speed);
                 delay(250);
         }
+
+        same_state = (current == prev_st) * same_state + 1;
 
         Motors::stop();
         delay(200);
 }
-
-// oi como faz isso aqui
